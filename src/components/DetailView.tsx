@@ -144,7 +144,7 @@ export const DetailView: React.FC<DetailViewProps> = ({
   return (
     <div className="fixed inset-0 z-40 bg-[#0d0f12] flex flex-col select-none overflow-hidden">
       {/* 顶部操作条 */}
-      <div className="h-14 bg-[#16191f]/95 border-b border-[#2a313d] px-4 flex items-center justify-between shrink-0">
+      <div className="h-14 bg-[#16191f]/95 border-b border-[#2a313d] px-4 flex items-center justify-between shrink-0 pt-[env(safe-area-inset-top,0px)]">
         <div className="flex items-center gap-3">
           <button
             onClick={onBackToGrid}
@@ -250,7 +250,7 @@ export const DetailView: React.FC<DetailViewProps> = ({
       </div>
 
       {/* 底部 LUT 快捷切换栏 */}
-      <div className="h-16 bg-[#16191f] border-t border-[#2a313d] px-4 flex items-center gap-2 overflow-x-auto shrink-0">
+      <div className="h-16 bg-[#16191f] border-t border-[#2a313d] px-4 flex items-center gap-2 overflow-x-auto shrink-0 pb-[env(safe-area-inset-bottom,0px)]">
         <span className="text-xs text-slate-500 font-medium shrink-0 mr-1">
           切换对比：
         </span>
