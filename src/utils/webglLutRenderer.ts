@@ -211,6 +211,23 @@ export class WebGLLutRenderer {
   }
 
   /**
+   * 逐帧高性能更新视频纹理（无需重建 Texture 对象）
+   */
+  public updateVideoSource(video: HTMLVideoElement): void {
+    const gl = this.gl;
+    if (!this.currentImageTexture) {
+      this.setImageSource(
+        video,
+        video.videoWidth || this.canvas.width,
+        video.videoHeight || this.canvas.height
+      );
+      return;
+    }
+    gl.bindTexture(gl.TEXTURE_2D, this.currentImageTexture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, video);
+  }
+
+  /**
    * 为指定的 LUT 创建或获取 3D 纹理
    */
   public getOrCreateLutTexture(lut: ParsedLut): WebGLTexture {

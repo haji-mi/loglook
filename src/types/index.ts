@@ -11,18 +11,28 @@ export interface ParsedLut {
   byteData: Uint8Array;
 }
 
-export interface LoadedImage {
+export type MediaType = 'image' | 'video';
+
+export interface LoadedMedia {
+  type: MediaType;
   file: File;
   name: string;
   originalWidth: number;
   originalHeight: number;
   previewWidth: number;
   previewHeight: number;
-  // 完整分辨率的 Image 对象
-  originalElement: HTMLImageElement;
-  // 缩放到最长边 <= 2048 的 ImageBitmap 或 Canvas，保证流畅交互
+  duration?: number; // 视频时长（秒）
+  // 完整分辨率的 Image 对象（若为图片）
+  originalImageElement?: HTMLImageElement;
+  // 兼容旧代码引用
+  originalElement?: HTMLImageElement;
+  // 视频元素（若为视频）
+  videoElement?: HTMLVideoElement;
+  // 预览 Canvas（对于图片是缩小预览；对于视频是当前帧预览）
   previewCanvas: HTMLCanvasElement;
 }
+
+export type LoadedImage = LoadedMedia;
 
 export interface AppError {
   id: string;

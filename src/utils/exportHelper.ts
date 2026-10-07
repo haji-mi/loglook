@@ -15,6 +15,13 @@ export function triggerDownload(blob: Blob, filename: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function getMediaSource(image: LoadedImage): TexImageSource {
+  if (image.type === 'video' && image.videoElement) {
+    return image.videoElement;
+  }
+  return (image.originalImageElement || image.originalElement || image.previewCanvas) as TexImageSource;
+}
+
 /**
  * 导出单个 LUT 的全分辨率成品图（PNG，按原始分辨率重新渲染）
  */
@@ -29,7 +36,8 @@ export async function exportSingleFullResolution(
 
   const renderer = new WebGLLutRenderer(exportCanvas);
   try {
-    renderer.setImageSource(image.originalElement, image.originalWidth, image.originalHeight);
+    const source = getMediaSource(image);
+    renderer.setImageSource(source, image.originalWidth, image.originalHeight);
     renderer.render({
       lut,
       intensity,
@@ -47,8 +55,15 @@ export async function exportSingleFullResolution(
     }
 
     const baseName = image.name.replace(/\.[^.]+$/, '');
-    const lutName = lut ? lut.name : '原图';
-    const filename = `${baseName}_${lutName}_100%.png`.replace('100%', `${Math.round(intensity * 100)}%`);
+    const lutName = lut ? lut.name : (image.type === 'video' ? '原视频' : '原图');
+    const intensityPercent = `${Math.round(intensity * 100)}%`;
+    let filename: string;
+    if (image.type === 'video' && image.videoElement) {
+      const curTime = image.videoElement.currentTime.toFixed(2);
+      filename = `${baseName}_${lutName}_${curTime}s_${intensityPercent}.png`;
+    } else {
+      filename = `${baseName}_${lutName}_${intensityPercent}.png`;
+    }
 
     triggerDownload(blob, filename);
   } finally {
@@ -110,7 +125,8 @@ export async function exportGridComparison(
   const renderer = new WebGLLutRenderer(offscreenCanvas);
 
   try {
-    renderer.setImageSource(image.originalElement, cellW, cellH);
+    const source = getMediaSource(image);
+    renderer.setImageSource(source, cellW, cellH);
 
     // 依次绘制每个单元格
     for (let index = 0; index < totalItems; index++) {
@@ -122,7 +138,9 @@ export async function exportGridComparison(
 
       const isOriginal = index === 0;
       const currentLut = isOriginal ? null : luts[index - 1];
-      const title = isOriginal ? '原图 (Apple Log)' : currentLut!.name;
+      const title = isOriginal 
+        ? (image.type === 'video' ? '原视频 (Apple Log)' : '原图 (Apple Log)')
+        : currentLut!.name;
 
       // WebGL 渲染当前格图像
       renderer.render({
@@ -169,7 +187,14 @@ export async function exportGridComparison(
     if (!blob) throw new Error('生成总图数据失败');
 
     const baseName = image.name.replace(/\.[^.]+$/, '');
-    triggerDownload(blob, `${baseName}_LUT对比总图.png`);
+    let filename: string;
+    if (image.type === 'video' && image.videoElement) {
+      const curTime = image.videoElement.currentTime.toFixed(2);
+      filename = `${baseName}_${curTime}s_LUT对比总图.png`;
+    } else {
+      filename = `${baseName}_LUT对比总图.png`;
+    }
+    triggerDownload(blob, filename);
   } finally {
     renderer.destroy();
   }
