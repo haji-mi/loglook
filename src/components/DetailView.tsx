@@ -3,6 +3,7 @@ import { ArrowLeft, Download, Sliders, ChevronLeft, ChevronRight } from 'lucide-
 import { LoadedImage, ParsedLut } from '../types';
 import { WebGLLutRenderer } from '../utils/webglLutRenderer';
 import { exportSingleFullResolution } from '../utils/exportHelper';
+import { VideoControls } from './VideoControls';
 
 interface DetailViewProps {
   image: LoadedImage;
@@ -12,6 +13,14 @@ interface DetailViewProps {
   onIntensityChange: (val: number) => void;
   onSelectLut: (lut: ParsedLut | null) => void;
   onBackToGrid: () => void;
+  // 视频播放相关
+  isVideoPlaying?: boolean;
+  videoCurrentTime?: number;
+  videoDuration?: number;
+  onTogglePlay?: () => void;
+  onSeekVideo?: (time: number) => void;
+  isLoop?: boolean;
+  onToggleLoop?: () => void;
 }
 
 export const DetailView: React.FC<DetailViewProps> = ({
@@ -22,6 +31,13 @@ export const DetailView: React.FC<DetailViewProps> = ({
   onIntensityChange,
   onSelectLut,
   onBackToGrid,
+  isVideoPlaying = false,
+  videoCurrentTime = 0,
+  videoDuration = 0,
+  onTogglePlay,
+  onSeekVideo,
+  isLoop = true,
+  onToggleLoop,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -30,6 +46,8 @@ export const DetailView: React.FC<DetailViewProps> = ({
   const [splitPos, setSplitPos] = useState<number>(0.5); // 0.0 ~ 1.0
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [isExporting, setIsExporting] = useState<boolean>(false);
+
+  const isVideo = image.type === 'video';
 
   // 初始化 WebGL2 渲染器并绑定预览纹理
   useEffect(() => {
@@ -40,9 +58,14 @@ export const DetailView: React.FC<DetailViewProps> = ({
       const renderer = new WebGLLutRenderer(canvas);
       rendererRef.current = renderer;
 
-      // 绑定原图
+      // 绑定素材纹理源（视频或图片预览）
+      const initialSource =
+        isVideo && image.videoElement
+          ? image.videoElement
+          : image.previewCanvas;
+
       renderer.setImageSource(
-        image.previewCanvas,
+        initialSource,
         image.previewWidth,
         image.previewHeight
       );
@@ -64,22 +87,48 @@ export const DetailView: React.FC<DetailViewProps> = ({
       rendererRef.current?.destroy();
       rendererRef.current = null;
     };
-  }, [image]);
+  }, [image, isVideo]);
 
-  // 响应 LUT、强度、分割位置变化实时渲染
+  // 响应 LUT、强度、分割位置或视频播放/时间轴变化实时渲染
   useEffect(() => {
     const renderer = rendererRef.current;
     if (!renderer) return;
 
-    renderer.render({
-      lut: currentLut,
-      intensity,
-      enableSplit: true,
-      splitPosition: splitPos,
-      targetWidth: image.previewWidth,
-      targetHeight: image.previewHeight,
-    });
-  }, [currentLut, intensity, splitPos, image]);
+    const renderDetailFrame = () => {
+      if (isVideo && image.videoElement) {
+        renderer.updateVideoSource(image.videoElement);
+      }
+
+      renderer.render({
+        lut: currentLut,
+        intensity,
+        enableSplit: true,
+        splitPosition: splitPos,
+        targetWidth: image.previewWidth,
+        targetHeight: image.previewHeight,
+      });
+    };
+
+    if (isVideo && isVideoPlaying) {
+      let animId: number;
+      const loop = () => {
+        renderDetailFrame();
+        animId = requestAnimationFrame(loop);
+      };
+      animId = requestAnimationFrame(loop);
+      return () => cancelAnimationFrame(animId);
+    } else {
+      renderDetailFrame();
+    }
+  }, [
+    currentLut,
+    intensity,
+    splitPos,
+    image,
+    isVideo,
+    isVideoPlaying,
+    videoCurrentTime,
+  ]);
 
   // 支持键盘快捷键：Esc 返回
   useEffect(() => {
@@ -158,7 +207,11 @@ export const DetailView: React.FC<DetailViewProps> = ({
           <div className="hidden sm:flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-sky-400" />
             <span className="font-semibold text-white text-sm">
-              {currentLut ? currentLut.name : '原图 (Apple Log)'}
+              {currentLut
+                ? currentLut.name
+                : isVideo
+                ? '原视频 (Apple Log)'
+                : '原图 (Apple Log)'}
             </span>
             {currentLut && (
               <span className="text-xs text-slate-400 font-mono">
@@ -187,7 +240,7 @@ export const DetailView: React.FC<DetailViewProps> = ({
           </span>
         </div>
 
-        {/* 右侧：单图全分辨率导出 */}
+        {/* 右侧：全分辨率导出 */}
         <button
           onClick={handleExportSingle}
           disabled={isExporting}
@@ -196,10 +249,20 @@ export const DetailView: React.FC<DetailViewProps> = ({
               ? 'bg-sky-800 text-slate-300 cursor-not-allowed'
               : 'bg-sky-600 hover:bg-sky-500 shadow-sky-900/30'
           }`}
-          title="按原始相机分辨率无损导出 PNG"
+          title={
+            isVideo
+              ? '按相机原始 4K/1080p 分辨率无损导出当前帧 PNG'
+              : '按原始相机分辨率无损导出 PNG'
+          }
         >
           <Download className="w-4 h-4" />
-          <span>{isExporting ? '正在渲染导出...' : '导出全分辨率单图'}</span>
+          <span>
+            {isExporting
+              ? '正在渲染导出...'
+              : isVideo
+              ? '导出当前帧全画质'
+              : '导出全分辨率单图'}
+          </span>
         </button>
       </div>
 
@@ -217,7 +280,7 @@ export const DetailView: React.FC<DetailViewProps> = ({
           {/* WebGL2 画布 */}
           <canvas
             ref={canvasRef}
-            className="max-w-full max-h-[calc(100vh-140px)] object-contain rounded-xl shadow-2xl border border-slate-800/80 pointer-events-none"
+            className="max-w-full max-h-[calc(100vh-170px)] object-contain rounded-xl shadow-2xl border border-slate-800/80 pointer-events-none"
           />
 
           {/* 分割线指示手柄 (覆盖在画布上) */}
@@ -238,15 +301,31 @@ export const DetailView: React.FC<DetailViewProps> = ({
           {/* 左原图 / 右效果浮层指示标 */}
           <div className="absolute top-4 left-4 pointer-events-none">
             <span className="px-2.5 py-1 rounded-md bg-black/60 backdrop-blur-sm text-[11px] font-medium text-slate-300 border border-white/10 shadow-lg">
-              ◀ 左侧：原图
+              ◀ 左侧：{isVideo ? '原视频 (Log)' : '原图'}
             </span>
           </div>
           <div className="absolute top-4 right-4 pointer-events-none">
             <span className="px-2.5 py-1 rounded-md bg-black/60 backdrop-blur-sm text-[11px] font-medium text-sky-300 border border-sky-400/20 shadow-lg">
-              右侧：{currentLut ? currentLut.name : '原图'} ▶
+              右侧：{currentLut ? currentLut.name : isVideo ? '原视频' : '原图'} ▶
             </span>
           </div>
         </div>
+
+        {/* 若为视频，在画布底部悬浮轻量控制条 */}
+        {isVideo && onTogglePlay && onSeekVideo && (
+          <div className="absolute bottom-5 inset-x-4 sm:inset-x-auto sm:w-[500px] z-30 mx-auto">
+            <VideoControls
+              isPlaying={isVideoPlaying}
+              onTogglePlay={onTogglePlay}
+              currentTime={videoCurrentTime}
+              duration={videoDuration}
+              onSeek={onSeekVideo}
+              isLoop={isLoop}
+              onToggleLoop={onToggleLoop}
+              compact
+            />
+          </div>
+        )}
       </div>
 
       {/* 底部 LUT 快捷切换栏 */}

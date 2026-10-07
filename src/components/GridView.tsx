@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { LoadedImage, ParsedLut } from '../types';
 import { WebGLLutRenderer } from '../utils/webglLutRenderer';
-import { UploadCloud, Maximize2 } from 'lucide-react';
+import { UploadCloud, Maximize2, Film } from 'lucide-react';
 
 interface GridViewProps {
   image: LoadedImage;
@@ -9,6 +9,8 @@ interface GridViewProps {
   intensity: number;
   onSelectLutForDetail: (lut: ParsedLut | null) => void;
   onLutsSelected: (files: File[]) => void;
+  isVideoPlaying?: boolean;
+  videoCurrentTime?: number;
 }
 
 export const GridView: React.FC<GridViewProps> = ({
@@ -17,14 +19,17 @@ export const GridView: React.FC<GridViewProps> = ({
   intensity,
   onSelectLutForDetail,
   onLutsSelected,
+  isVideoPlaying = false,
+  videoCurrentTime = 0,
 }) => {
   const lutInputRef = useRef<HTMLInputElement>(null);
 
   // 为每个格子存储 2D Canvas 的引用
-  // key: 'original' 或 lut.id
   const canvasRefs = useRef<Map<string, HTMLCanvasElement>>(new Map());
   // 维护一个共享的 WebGL2 离屏渲染器
   const rendererRef = useRef<WebGLLutRenderer | null>(null);
+
+  const isVideo = image.type === 'video';
 
   // 初始化共享渲染器
   useEffect(() => {
@@ -33,9 +38,14 @@ export const GridView: React.FC<GridViewProps> = ({
       const renderer = new WebGLLutRenderer(offscreenCanvas);
       rendererRef.current = renderer;
 
-      // 绑定原图预览源
+      // 绑定素材纹理源（视频元素或预览画布）
+      const initialSource =
+        isVideo && image.videoElement
+          ? image.videoElement
+          : image.previewCanvas;
+
       renderer.setImageSource(
-        image.previewCanvas,
+        initialSource,
         image.previewWidth,
         image.previewHeight
       );
@@ -47,68 +57,97 @@ export const GridView: React.FC<GridViewProps> = ({
       rendererRef.current?.destroy();
       rendererRef.current = null;
     };
-  }, [image]);
+  }, [image, isVideo]);
 
-  // 当原图、LUT列表或强度更新时，重绘所有格子
+  // 响应素材、LUT列表、强度或视频播放与时间轴拖动
   useEffect(() => {
     const renderer = rendererRef.current;
     if (!renderer) return;
 
-    // 1. 渲染「原图」格子
-    const origCanvas = canvasRefs.current.get('original');
-    if (origCanvas) {
-      if (origCanvas.width !== image.previewWidth || origCanvas.height !== image.previewHeight) {
-        origCanvas.width = image.previewWidth;
-        origCanvas.height = image.previewHeight;
+    const renderAllCards = () => {
+      // 若为视频，将当前视频帧更新到 WebGL 纹理
+      if (isVideo && image.videoElement) {
+        renderer.updateVideoSource(image.videoElement);
       }
-      renderer.render({
-        lut: null,
-        intensity: 1.0,
-        enableSplit: false,
-        targetWidth: image.previewWidth,
-        targetHeight: image.previewHeight,
+
+      // 1. 渲染「原图/原视频」格子
+      const origCanvas = canvasRefs.current.get('original');
+      if (origCanvas) {
+        if (
+          origCanvas.width !== image.previewWidth ||
+          origCanvas.height !== image.previewHeight
+        ) {
+          origCanvas.width = image.previewWidth;
+          origCanvas.height = image.previewHeight;
+        }
+        renderer.render({
+          lut: null,
+          intensity: 1.0,
+          enableSplit: false,
+          targetWidth: image.previewWidth,
+          targetHeight: image.previewHeight,
+        });
+        renderer.copyTo2DCanvas(origCanvas);
+      }
+
+      // 2. 依次渲染各个 LUT 格子
+      luts.forEach((lut) => {
+        const canvas = canvasRefs.current.get(lut.id);
+        if (!canvas) return;
+
+        if (
+          canvas.width !== image.previewWidth ||
+          canvas.height !== image.previewHeight
+        ) {
+          canvas.width = image.previewWidth;
+          canvas.height = image.previewHeight;
+        }
+
+        renderer.render({
+          lut,
+          intensity,
+          enableSplit: false,
+          targetWidth: image.previewWidth,
+          targetHeight: image.previewHeight,
+        });
+        renderer.copyTo2DCanvas(canvas);
       });
-      renderer.copyTo2DCanvas(origCanvas);
+    };
+
+    if (isVideo && isVideoPlaying) {
+      let animId: number;
+      const loop = () => {
+        renderAllCards();
+        animId = requestAnimationFrame(loop);
+      };
+      animId = requestAnimationFrame(loop);
+      return () => cancelAnimationFrame(animId);
+    } else {
+      // 视频暂停、时间轴跳转或静态图片：单次更新渲染
+      renderAllCards();
     }
-
-    // 2. 依次渲染各个 LUT 格子
-    luts.forEach((lut) => {
-      const canvas = canvasRefs.current.get(lut.id);
-      if (!canvas) return;
-
-      if (canvas.width !== image.previewWidth || canvas.height !== image.previewHeight) {
-        canvas.width = image.previewWidth;
-        canvas.height = image.previewHeight;
-      }
-
-      renderer.render({
-        lut,
-        intensity,
-        enableSplit: false,
-        targetWidth: image.previewWidth,
-        targetHeight: image.previewHeight,
-      });
-      renderer.copyTo2DCanvas(canvas);
-    });
-  }, [image, luts, intensity]);
+  }, [image, luts, intensity, isVideo, isVideoPlaying, videoCurrentTime]);
 
   return (
     <main className="max-w-7xl mx-auto px-4 py-6 sm:px-6">
       {/* 提示信息 */}
-      <div className="flex items-center justify-between mb-5">
-        <div className="text-xs sm:text-sm text-slate-400">
-          点击任意卡片进入全屏大图，使用可拖动滑杆进行细节左右对比
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-5">
+        <div className="text-xs sm:text-sm text-slate-400 flex items-center gap-1.5">
+          {isVideo && <Film className="w-3.5 h-3.5 text-sky-400" />}
+          <span>
+            {isVideo
+              ? '支持 Log 视频 60fps 实时同步对比播放与定格；点击任意卡片进入全屏大图'
+              : '点击任意卡片进入全屏大图，使用可拖动滑杆进行细节左右对比'}
+          </span>
         </div>
         <div className="text-xs text-slate-500 font-mono">
           共 {1 + luts.length} 个视口
         </div>
       </div>
 
-      {/* 对比网格布局：
-          手机端 1 列或 2 列，桌面端 3 列，卡片宽窄自适应
-      */}
+      {/* 对比网格布局 */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-        {/* 第一格：永远是「原图」 */}
+        {/* 第一格：永远是「原图/原视频」 */}
         <div
           onClick={() => onSelectLutForDetail(luts.length > 0 ? luts[0] : null)}
           className="group relative bg-[#16191f] rounded-2xl border border-slate-800 hover:border-sky-500/80 transition-all duration-200 overflow-hidden cursor-pointer shadow-lg hover:shadow-sky-950/20 flex flex-col"
@@ -132,7 +171,9 @@ export const GridView: React.FC<GridViewProps> = ({
           <div className="p-3.5 bg-[#16191f] border-t border-slate-800/80 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-slate-400" />
-              <span className="font-semibold text-sm text-white">原图 (Apple Log)</span>
+              <span className="font-semibold text-sm text-white">
+                {isVideo ? '原视频 (Apple Log)' : '原图 (Apple Log)'}
+              </span>
             </div>
             <span className="text-[11px] text-slate-500 font-mono">
               无调色
